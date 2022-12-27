@@ -12,8 +12,8 @@
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/element-ui/lib/theme-chalk/index.css">
     <script src="https://cdn.jsdelivr.net/npm/element-ui/lib/index.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.1.1/crypto-js.min.js"></script>
-    <link rel="stylesheet" href="./mavon-editor/dist/css/index.css">
-    <script src="./mavon-editor/dist/mavon-editor.js"></script>
+    <link rel="stylesheet" href="https://npm.elemecdn.com/heyiki-cdn/mavon-editor/dist/css/index.css">
+    <script src="https://npm.elemecdn.com/heyiki-cdn/mavon-editor/dist/mavon-editor.js"></script>
 </head>
 <body>
     <div id="app">
