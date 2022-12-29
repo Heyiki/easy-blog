@@ -64,10 +64,19 @@
                             <el-button
                                     size="small"
                                     @click="handleEdit(scope.row.id)">Edit</el-button>
-                            <el-button
+                            <el-popconfirm
+                              confirm-button-text='Confirm'
+                              cancel-button-text='Cancel'
+                              icon="el-icon-info"
+                              icon-color="red"
+                              title="Are you sure you want to delete?"
+                            >
+                              <el-button
+                                    slot="reference"
                                     size="small"
                                     type="danger"
                                     @click="handleDelete(scope.row.id)">Delete</el-button>
+                            </el-popconfirm>
                         </template>
                     </el-table-column>
                 </el-table>
