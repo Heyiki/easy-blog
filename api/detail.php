@@ -35,7 +35,7 @@
                     <el-input v-model="form.tags" autocomplete="off"></el-input>
                 </el-form-item>
                 <el-form-item label="Status">
-                    <el-switch v-model="form.status === 1"></el-switch>
+                    <el-switch v-model="form.status"></el-switch>
                 </el-form-item>
                 <el-form-item
                         label="Content"
