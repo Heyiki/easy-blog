@@ -35,7 +35,8 @@
                     <el-input v-model="form.tags" autocomplete="off"></el-input>
                 </el-form-item>
                 <el-form-item label="Status">
-                    <el-switch v-model="form.status"></el-switch>
+                    <el-radio v-model="form.status" label="0">Draft</el-radio>
+                    <el-radio v-model="form.status" label="1">Published</el-radio>
                 </el-form-item>
                 <el-form-item
                         label="Content"
