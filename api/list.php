@@ -138,19 +138,27 @@
                 }
             },
             handleDelete(id) {
-                if(id){
-                    let EB_TOKEN = this.checkToken()
-                    if (!EB_TOKEN) return false
-                    this.$http.post(this.apiUrl, {m:'delete',pid:id},{emulateJSON:true,headers:{'token':EB_TOKEN}}).then(res=>{
-                        let code = res.body.code
-                        if (code === 200) {
-                            this.$message.success(res.body.msg)
-                            this.getArticleList(this.formSearch)
-                            return false
-                        }
-                        this.$message.error(res.body.msg)
-                    })
-                }
+                this.$confirm('Are you sure you want to delete?', 'Tips', {
+                    confirmButtonText: 'Confirm',
+                    cancelButtonText: 'Cancel',
+                    type: 'warning'
+                }).then(() => {
+                    if(id){
+                        let EB_TOKEN = this.checkToken()
+                        if (!EB_TOKEN) return false
+                        this.$http.post(this.apiUrl, {m:'delete',pid:id},{emulateJSON:true,headers:{'token':EB_TOKEN}}).then(res=>{
+                            let code = res.body.code
+                            if (code === 200) {
+                                this.$message.success(res.body.msg)
+                                this.getArticleList(this.formSearch)
+                                return false
+                            }
+                            this.$message.error(res.body.msg)
+                        })
+                    }
+                }).catch(() => {
+                    // cancel
+                })
             },
             checkToken() {
                 let EB_TOKEN = localStorage.getItem('EB_TOKEN')
