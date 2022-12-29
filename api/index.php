@@ -167,7 +167,7 @@ class Index
         $properties = $preview['properties'] ?? [];
         if (empty($properties)) $this->retJson([],'Unknown object',400);
         $this->retJson([
-            'id'=>$this->pageId,
+            'pid'=>$this->pageId,
             'status'=>$properties['status']['number'],
             'tags'=>$properties['tags']['rich_text'][0]['plain_text'],
             'title'=>$properties['title']['title'][0]['plain_text'],

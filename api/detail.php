@@ -54,7 +54,7 @@
                     </mavon-editor>
                 </el-form-item>
                 <el-form-item>
-                    <el-button type="primary" @click="saveArticle">{{ form.id !== 0 ? 'Save' : 'Add'}}</el-button>
+                    <el-button :loading="btnLoading" type="primary" @click="saveArticle">{{ form.id !== 0 ? 'Save' : 'Add'}}</el-button>
                     <el-button @click="resetForm('form')">Reset</el-button>
                 </el-form-item>
             </el-form>
@@ -83,9 +83,10 @@
         data() {
             return {
                 apiUrl: '<?= $_ENV['API_URL'] ?? ''; ?>',
+                btnLoading: false,
                 method: 'create',
                 form: {
-                    id: 0,
+                    pid: 0,
                     tags: '',
                     title: '',
                     content: '',
@@ -122,9 +123,9 @@
                     /* 1.4.2 */
                     navigation: true,
                     /* 2.1.8 */
-                    alignleft: true,
-                    aligncenter: true,
-                    alignright: true,
+                    alignleft: false,
+                    aligncenter: false,
+                    alignright: false,
                     /* 2.2.1 */
                     subfield: true,
                     preview: true,
@@ -155,16 +156,24 @@
             saveArticle() {
                 this.$refs.form.validate((valid) => {
                     if (valid) {
+                        let EB_TOKEN = this.checkToken()
+                        if (!EB_TOKEN) return false
+                        this.btnLoading = true
                         let form = Object.assign({},this.form)
                         form.content = CryptoJS.enc.Base64.stringify(CryptoJS.enc.Utf8.parse(form.content))
-                        form.m = this.method;
-                        this.$http.post(this.apiUrl,form,{emulateJSON:true}).then(res=>{
+                        form.m = this.method
+                        form.status = form.status ? 1 : 0
+                        this.$http.post(this.apiUrl,form,{emulateJSON:true,headers:{'token':EB_TOKEN}}).then(res=>{
                             let code = res.body.code
                             if (code === 200) {
                                 this.$message.success(res.body.msg)
-                                return false
+                            } else {
+                                if (code === 403) {
+                                    localStorage.removeItem('EB_TOKEN')
+                                }
+                                this.$message.error(res.body.msg)
                             }
-                            this.$message.error(res.body.msg)
+                            this.btnLoading = false
                         })
                     } else {
                         console.log('error submit!!');
@@ -172,8 +181,39 @@
                     }
                 })
             },
+            checkToken() {
+                let EB_TOKEN = localStorage.getItem('EB_TOKEN')
+                if (!EB_TOKEN) {
+                    this.$prompt('Please enter the operation key', 'Tips', {
+                        confirmButtonText: 'Confirm',
+                        cancelButtonText: 'Cancel',
+                        inputType: 'password',
+                    }).then(({ value }) => {
+                        this.$http.post(this.apiUrl, {m:'login',operate_key:value},{emulateJSON:true}).then(res=>{
+                            let code = res.body.code
+                            if (code !== 200) {
+                                this.$message.error(res.body.msg)
+                                return false
+                            }
+                            localStorage.setItem('EB_TOKEN',res.body.data.token)
+                            return res.body.data.token
+                        })
+                    }).catch(() => {
+                        return false
+                    });
+                    return false
+                }
+                return EB_TOKEN
+            },
             getArticleDetail(id) {
+                const loading = this.$loading({
+                    lock: true,
+                    text: 'Loading',
+                    spinner: 'el-icon-loading',
+                    background: 'rgba(0, 0, 0, 0.7)'
+                });
                 this.$http.get(this.apiUrl,{params:{m:"detail",pid:id}}).then(res=>{
+                    loading.close();
                     let code = res.body.code
                     if (code === 200) {
                         if (res.body.data.content) {

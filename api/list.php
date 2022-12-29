@@ -40,40 +40,45 @@
                 </el-col>
             </el-row>
 
-            <el-table
-                    :data="tableData"
-                    stripe
-                    style="width: 100%">
-                <el-table-column label="ID" prop="id" width="350"></el-table-column>
-                <el-table-column label="Title" prop="title" width=""></el-table-column>
-                <el-table-column label="Tags" prop="tags" width="120"></el-table-column>
-                <el-table-column label="Create time" prop="created_at" width="180"></el-table-column>
-                <el-table-column label="Update time" prop="updated_at" width="180"></el-table-column>
-                <el-table-column label="Status" prop="status" width="80">
-                    <template slot-scope="scope">
-                        <el-tag v-if="scope.row.status === 1" type="success" effect="plain">Published</el-tag>
-                        <el-tag v-else type="danger" effect="plain">Draft</el-tag>
-                    </template>
-                </el-table-column>
-                <el-table-column label="Operate" width="180">
-                    <template slot-scope="scope">
-                        <el-button
-                                size="mini"
-                                @click="handleEdit(scope.row.id)">Edit</el-button>
-                        <el-button
-                                size="mini"
-                                type="danger"
-                                @click="handleDelete(scope.row.id)">Delete</el-button>
-                    </template>
-                </el-table-column>
-            </el-table>
+            <template v-if="loading">
+                <el-skeleton  :rows="6" animated />
+            </template>
+            <template v-else>
+                <el-table
+                        :data="tableData"
+                        stripe
+                        style="width: 100%">
+                    <el-table-column label="ID" prop="id" width="350"></el-table-column>
+                    <el-table-column label="Title" prop="title" width=""></el-table-column>
+                    <el-table-column label="Tags" prop="tags" width=""></el-table-column>
+                    <el-table-column label="Create time" prop="created_at" width="180"></el-table-column>
+                    <el-table-column label="Update time" prop="updated_at" width="180"></el-table-column>
+                    <el-table-column label="Status" prop="status" width="120">
+                        <template slot-scope="scope">
+                            <el-tag v-if="scope.row.status === 1" type="success" effect="plain">Published</el-tag>
+                            <el-tag v-else type="danger" effect="plain">Draft</el-tag>
+                        </template>
+                    </el-table-column>
+                    <el-table-column label="Operate" width="180">
+                        <template slot-scope="scope">
+                            <el-button
+                                    size="small"
+                                    @click="handleEdit(scope.row.id)">Edit</el-button>
+                            <el-button
+                                    size="small"
+                                    type="danger"
+                                    @click="handleDelete(scope.row.id)">Delete</el-button>
+                        </template>
+                    </el-table-column>
+                </el-table>
 
-            <div style="margin-top: 20px">
-                <el-button-group>
-                    <el-button @click="firstPage" size="small" icon="el-icon-d-arrow-left">First page</el-button>
-                    <el-button @click="nextPage" v-if="pageSearch.next_cursor" type="primary" size="small">Next page<i class="el-icon-arrow-right el-icon--right"></i></el-button>
-                </el-button-group>
-            </div>
+                <div style="margin-top: 20px">
+                    <el-button-group>
+                        <el-button @click="firstPage" size="small" icon="el-icon-d-arrow-left">First page</el-button>
+                        <el-button @click="nextPage" v-if="pageSearch.next_cursor" type="primary" size="small">Next page<i class="el-icon-arrow-right el-icon--right"></i></el-button>
+                    </el-button-group>
+                </div>
+            </template>
         </div>
     </div>
 </body>
@@ -84,6 +89,7 @@
         data() {
             return {
                 apiUrl: '<?= $_ENV['API_URL'] ?? ''; ?>',
+                loading: true,
                 tableData: [],
                 pageSearch: {
                     next_cursor: null
@@ -124,7 +130,9 @@
             },
             handleDelete(id) {
                 if(id){
-                    this.$http.post(this.apiUrl, {m:'delete',pid:id},{emulateJSON:true}).then(res=>{
+                    let EB_TOKEN = this.checkToken()
+                    if (!EB_TOKEN) return false
+                    this.$http.post(this.apiUrl, {m:'delete',pid:id},{emulateJSON:true,headers:{'token':EB_TOKEN}}).then(res=>{
                         let code = res.body.code
                         if (code === 200) {
                             this.$message.success(res.body.msg)
@@ -135,17 +143,49 @@
                     })
                 }
             },
+            checkToken() {
+                let EB_TOKEN = localStorage.getItem('EB_TOKEN')
+                if (!EB_TOKEN) {
+                    this.$prompt('Please enter the operation key', 'Tips', {
+                        confirmButtonText: 'Confirm',
+                        cancelButtonText: 'Cancel',
+                        inputType: 'password',
+                    }).then(({ value }) => {
+                        this.$http.post(this.apiUrl, {m:'login',operate_key:value},{emulateJSON:true}).then(res=>{
+                            let code = res.body.code
+                            if (code !== 200) {
+                                this.$message.error(res.body.msg)
+                                return false
+                            }
+                            localStorage.setItem('EB_TOKEN',res.body.data.token)
+                            return res.body.data.token
+                        })
+                    }).catch(() => {
+                        return false
+                    });
+                    return false
+                }
+                return EB_TOKEN
+            },
             getArticleList(params){
                 if (!params) {
                     this.$message.error('Failed to obtain request parameters!')
                     return false
                 }
+                const loading = this.$loading({
+                    lock: true,
+                    text: 'Loading',
+                    spinner: 'el-icon-loading',
+                    background: 'rgba(0, 0, 0, 0.7)'
+                });
                 this.$http.get(this.apiUrl,{params:params}).then(res => {
+                    loading.close();
                     let code = res.body.code
                     if (code === 200) {
                         this.tableData = res.body.data.list
                         this.pageSearch.next_cursor = res.body.data.next_cursor ?? null
                     }
+                    this.loading = false
                 })
             },
         },
