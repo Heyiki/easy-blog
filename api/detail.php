@@ -35,8 +35,10 @@
                     <el-input v-model="form.tags" autocomplete="off"></el-input>
                 </el-form-item>
                 <el-form-item label="Status">
-                    <el-radio v-model="form.status" label="0">Draft</el-radio>
-                    <el-radio v-model="form.status" label="1">Published</el-radio>
+                    <el-radio-group v-model="form.status">
+                      <el-radio :label="0">Draft</el-radio>
+                      <el-radio :label="1">Published</el-radio>
+                    </el-radio-group>
                 </el-form-item>
                 <el-form-item
                         label="Content"
@@ -161,7 +163,7 @@
                         if (!EB_TOKEN) return false
                         this.btnLoading = true
                         let form = Object.assign({},this.form)
-                        form.content = CryptoJS.enc.Base64.stringify(CryptoJS.enc.Utf8.parse(form.content))
+                        form.content = encodeURIComponent(CryptoJS.enc.Base64.stringify(CryptoJS.enc.Utf8.parse(form.content)))
                         form.m = this.method
                         form.status = form.status ? 1 : 0
                         this.$http.post(this.apiUrl,form,{emulateJSON:true,headers:{'token':EB_TOKEN}}).then(res=>{
@@ -218,7 +220,7 @@
                     let code = res.body.code
                     if (code === 200) {
                         if (res.body.data.content) {
-                            res.body.data.content = CryptoJS.enc.Base64.parse(res.body.data.content).toString(CryptoJS.enc.Utf8)
+                            res.body.data.content = CryptoJS.enc.Base64.parse(decodeURIComponent(res.body.data.content)).toString(CryptoJS.enc.Utf8)
                         }
                         this.form = res.body.data
                     }
