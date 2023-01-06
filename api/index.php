@@ -360,6 +360,61 @@ class Index
             ]
         );
     }
+    
+    # Get the last 15 days weather
+    public function weather()
+    {
+        if (empty($_ENV['WEATHER_URL'])) {
+            $addr = file_get_contents('http://ip-api.com/json/');
+            $addr = json_decode($addr);
+            $country = strtolower($addr->country);
+            $province = strtolower($addr->regionName);
+            $city = strtolower($addr->city);
+            $url = $country == 'china' ? "https://tianqi.moji.com/forecast15/china/{$province}/{$city}" : '';
+        } else {
+            $url = $_ENV['WEATHER_URL'];
+        }
+        if(empty($url)) $this->retJson([],'Unknown location',400);
+        $html = file_get_contents($url);
+        $res = $this->get_tag_data($html,'ul','class','clearfix');
+        if(empty($res)) $this->retJson([],'Get weather error location',400);
+        $week = $this->get_tag_data($res[0],'span','class','week');
+        $temperature = $this->get_tag_data($res[0],'div','class','tree clearfix');
+        $wea = $this->get_tag_data($res[0],'span','class','wea');
+        $cycle = [];
+        if(!empty($week)) {
+            foreach ($week as $k => $v){
+                if($k%2!=0){
+                    $cycle[$k-1]['week'] = $v;
+                } else {
+                    $cycle[$k]['date'] = $v;
+                    if (!empty($wea[$k]) && !empty($wea[$k+1])) {
+                        $cycle[$k]['wea'] = $wea[$k] === $wea[$k+1] ? $wea[$k] : $wea[$k] . ' => ' . $wea[$k+1];
+                    }
+                }
+            }
+        }
+        $cycle = !empty($cycle) ? array_merge($cycle) : [];
+        if(!empty($cycle)) {
+            foreach ($cycle as $k => $v) {
+                if(!empty($temperature[$k])) {
+                    preg_match_all('/<b>(.*?)<\/b>/',$temperature[$k],$max);
+                    preg_match_all('/<strong>(.*?)<\/strong>/',$temperature[$k],$min);
+                }
+                $cycle[$k]['max'] = !empty($max[1][0]) ? $max[1][0] : 'unknown';
+                $cycle[$k]['min'] = !empty($min[1][0]) ? $min[1][0] : 'unknown';
+            }
+        }
+        $this->retJson($cycle);
+    }
+    
+    private function get_tag_data($html,$tag,$class,$value){
+        // $value is empty, then get all the content of class=$class
+        $regex = $value ? "/<$tag.*?$class=\"$value\".*?>(.*?)<\/$tag>/is" :  "/<$tag.*?$class=\".*?$value.*?\".*?>(.*?)<\/$tag>/is";
+        preg_match_all($regex,$html,$matches);
+        // The return value is an array, the contents of the tag found
+        return $matches[1];
+    }
 }
 
 print_r((new Index())->handle());
