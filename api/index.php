@@ -374,7 +374,7 @@ class Index
         } else {
             $url = $_ENV['WEATHER_URL'];
         }
-        if(empty($url)) $this->retJson([],'Unknown location',400);
+        if(empty($url)) $this->retJson(['c'=>$addr],'Unknown location',400);
         $html = file_get_contents($url);
         $res = $this->get_tag_data($html,'ul','class','clearfix');
         if(empty($res)) $this->retJson([],'Get weather error location',400);
