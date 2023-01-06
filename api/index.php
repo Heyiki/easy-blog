@@ -364,16 +364,7 @@ class Index
     # Get the last 15 days weather
     public function weather()
     {
-        if (empty($_ENV['WEATHER_URL'])) {
-            $addr = file_get_contents('http://ip-api.com/json/');
-            $addr = json_decode($addr);
-            $country = strtolower($addr->country);
-            $province = strtolower($addr->regionName);
-            $city = strtolower($addr->city);
-            $url = $country == 'china' ? "https://tianqi.moji.com/forecast15/china/{$province}/{$city}" : '';
-        } else {
-            $url = $_ENV['WEATHER_URL'];
-        }
+        $url = $_ENV['WEATHER_URL'] ?? 'https://tianqi.moji.com/forecast15/china/guangdong/shenzhen';
         if(empty($url)) $this->retJson(['c'=>$addr],'Unknown location',400);
         $html = file_get_contents($url);
         $res = $this->get_tag_data($html,'ul','class','clearfix');
