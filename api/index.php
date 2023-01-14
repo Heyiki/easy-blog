@@ -166,13 +166,11 @@ class Index
         $block = $this->curlSend('https://api.notion.com/v1/blocks/'.$this->pageId.'/children',[],'GET');
         $properties = $preview['properties'] ?? [];
         if (empty($properties)) $this->retJson([],'Unknown object',400);
-        if (count($block['results']) > 1) {
-            $content = '';
-            foreach ($block['results'] as $v) {
+        $content = '';
+        foreach ($block['results'] as $v) {
+            if (!empty($v['paragraph']['rich_text'][0]['plain_text'])) {
                 $content .= $v['paragraph']['rich_text'][0]['plain_text'];
             }
-        } else {
-            $content = $block['results'][0]['paragraph']['rich_text'][0]['plain_text'];
         }
         $this->retJson([
             'pid'=>$this->pageId,
