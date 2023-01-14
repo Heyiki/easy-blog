@@ -168,7 +168,7 @@
                             localStorage.setItem('EB_TOKEN',res.body.data.token)
                             this.$notify.success({
                               title: 'Success',
-                              message: 'The verification operation key is successful, please operate.'
+                              message: 'Operation key verification passed.'
                             })
                             return res.body.data.token
                         })
