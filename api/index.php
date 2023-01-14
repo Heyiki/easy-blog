@@ -166,12 +166,20 @@ class Index
         $block = $this->curlSend('https://api.notion.com/v1/blocks/'.$this->pageId.'/children',[],'GET');
         $properties = $preview['properties'] ?? [];
         if (empty($properties)) $this->retJson([],'Unknown object',400);
+        if (count($block['results']) > 1) {
+            $content = '';
+            foreach ($block['results'] as $v) {
+                $content .= $v['paragraph']['rich_text'][0]['plain_text'];
+            }
+        } else {
+            $content = $block['results'][0]['paragraph']['rich_text'][0]['plain_text'];
+        }
         $this->retJson([
             'pid'=>$this->pageId,
             'status'=>$properties['status']['number'],
             'tags'=>$properties['tags']['rich_text'][0]['plain_text'],
             'title'=>$properties['title']['title'][0]['plain_text'],
-            'content'=>$block['results'][0]['paragraph']['rich_text'][0]['plain_text'],
+            'content'=>$content,
         ]);
     }
 
@@ -193,8 +201,89 @@ class Index
     }
 
     # Get the created structure
-    private function structure()
+    private function structure($isEdit = false)
     {
+        $content = $this->getParam('content');
+        $limit_str = 2000;
+        $strLen = mb_strlen($content,'UTF-8');
+        if ($strLen > $limit_str) {
+            $format = [];
+            $ret = array();
+            for ($i = 0; $i < $strLen; $i += $limit_str) {
+                $ret[] = mb_substr($content, $i, $limit_str,'UTF-8');
+            }
+            if (!empty($ret)) {
+                foreach ($ret as $v) {
+                    if ($isEdit) {
+                        $format[] = [
+                            "paragraph"=> [
+                                "rich_text"=> [
+                                    [
+                                        "type"=> "text",
+                                        "text"=> [
+                                            "content"=> $v,
+                                            "link"=> null
+                                        ]
+                                    ]
+                                ]
+                            ],
+                        ];
+                    } else {
+                        $format[] = [
+                            'object'=>'block',
+                            "type"=> "paragraph",
+                            "paragraph"=> [
+                                "rich_text"=> [
+                                    [
+                                        "type"=> "text",
+                                        "text"=> [
+                                            "content"=> $v,
+                                            "link"=> null
+                                        ]
+                                    ]
+                                ]
+                            ],
+                        ];
+                    }
+                }
+            }
+        } else {
+            if ($isEdit) {
+                $format = [
+                    [
+                        "paragraph"=> [
+                            "rich_text"=> [
+                                [
+                                    "type"=> "text",
+                                    "text"=> [
+                                        "content"=> $content,
+                                        "link"=> null
+                                    ]
+                                ]
+                            ]
+                        ],
+                    ]
+                ];
+            } else {
+                $format = [
+                    [
+                        'object'=>'block',
+                        "type"=> "paragraph",
+                        "paragraph"=> [
+                            "rich_text"=> [
+                                [
+                                    "type"=> "text",
+                                    "text"=> [
+                                        "content"=> $content,
+                                        "link"=> null
+                                    ]
+                                ]
+                            ]
+                        ],
+                    ]
+                ];
+            }
+        }
         return [
             'properties'=>[
                 'title' => [
@@ -226,23 +315,7 @@ class Index
                     'number' => (int)$this->getParam('status')
                 ]
             ],
-            'children'=>[
-                [
-                    'object'=>'block',
-                    "type"=> "paragraph",
-                    "paragraph"=> [
-                        "rich_text"=> [
-                            [
-                                "type"=> "text",
-                                "text"=> [
-                                    "content"=> $this->getParam('content'),
-                                    "link"=> null
-                                ]
-                            ]
-                        ]
-                    ]
-                ]
-            ]
+            'children'=>$format,
         ];
     }
 
@@ -258,14 +331,16 @@ class Index
         $block = $this->curlSend('https://api.notion.com/v1/blocks/'.$this->pageId.'/children',[],'GET');
         if (empty($page['properties'])&&empty($block['results'][0]['id'])) $this->retJson([],'Unknown object',400);
 
-        // update page data
-        $data = $this->structure();
-        // update block data
-        $block['results'][0]['paragraph']['rich_text'][0]['text']['content'] = $this->getParam('content');
-        $block['results'][0]['paragraph']['rich_text'][0]['plain_text'] = $this->getParam('content');
+        $data = $this->structure(true);
 
+        foreach ($block['results'] as $v) {
+            $this->curlSend('https://api.notion.com/v1/blocks/'.$v['id'],[],'DELETE');
+        }
+
+        // update page data
         $res = $this->curlSend('https://api.notion.com/v1/pages/'.$this->pageId,['properties'=>$data['properties']],'PATCH');
-        $res1 = $this->curlSend('https://api.notion.com/v1/blocks/'.$block['results'][0]['id'],['paragraph'=>$block['results'][0]['paragraph']],'PATCH');
+        // update block data
+        $res1 = $this->curlSend('https://api.notion.com/v1/blocks/'.$this->pageId.'/children',['children'=>$data['children']],'PATCH');
         if (isset($res['status']) && $res['status'] == 400) {
             $this->retJson($res,'Update failed',400);
         }
