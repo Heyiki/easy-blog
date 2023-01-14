@@ -199,6 +199,10 @@
                                 return false
                             }
                             localStorage.setItem('EB_TOKEN',res.body.data.token)
+                            this.$notify.success({
+                              title: 'Success',
+                              message: 'Verify that the operation key is successful, please perform the operation quickly'
+                            })
                             return res.body.data.token
                         })
                     }).catch(() => {
