@@ -394,7 +394,10 @@ class Index
 
     private function isoDateToDateTime($isoDate = '')
     {
-        return date("Y-m-d H:i",strtotime($isoDate));
+        // form UTC to Asia/Shanghai
+        $date = new DateTime(date("Y-m-d H:i",strtotime($isoDate)), new DateTimeZone('UTC'));
+        $date->setTimezone(new DateTimeZone('Asia/Shanghai'));
+        return $date->format('Y-m-d H:i');
     }
 
     private function retJson($data = [], $msg = 'ok', $code = 200)
