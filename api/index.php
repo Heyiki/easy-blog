@@ -394,7 +394,7 @@ class Index
 
     private function isoDateToDateTime($isoDate = '')
     {
-        return date("Y-m-d H:i:s",strtotime($isoDate));
+        return date("Y-m-d H:i",strtotime($isoDate));
     }
 
     private function retJson($data = [], $msg = 'ok', $code = 200)
