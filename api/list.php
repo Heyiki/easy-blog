@@ -9,8 +9,8 @@
     <script src="https://cdn.bootcss.com/jquery/3.4.1/jquery.min.js"></script>
     <script src="https://cdn.bootcdn.net/ajax/libs/vue/2.5.16/vue.min.js"></script>
     <script src="https://cdn.bootcdn.net/ajax/libs/vue-resource/1.5.1/vue-resource.min.js"></script>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/element-ui/2.15.13/theme-chalk/index.min.css">
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/element-ui/2.15.13/index.min.js"></script>
+    <link rel="stylesheet" href="https://cdn.staticfile.org/element-ui/2.15.13/theme-chalk/index.min.css">
+    <script src="https://cdn.staticfile.org/element-ui/2.15.13/index.min.js"></script>
 </head>
 <body>
     <div id="app">
