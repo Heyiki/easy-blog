@@ -436,12 +436,20 @@ class Index
             ]
         );
     }
+
+    # Poetry Recommendation
+    public function poetry()
+    {
+        $callback = file_get_contents('https://v1.jinrishici.com/all.json');
+        $callback = $callback ? json_decode($callback,true) : [];
+        $this->retJson($callback);
+    }
     
     # Get the last 15 days weather
     public function weather()
     {
         $url = $_ENV['WEATHER_URL'] ?? 'https://tianqi.moji.com/forecast15/china/guangdong/shenzhen';
-        if(empty($url)) $this->retJson(['c'=>$addr],'Unknown location',400);
+        if(empty($url)) $this->retJson(['c'=>$_ENV['WEATHER_URL']],'Unknown location',400);
         $html = file_get_contents($url);
         $res = $this->get_tag_data($html,'ul','class','clearfix');
         if(empty($res)) $this->retJson([],'Get weather error location',400);
