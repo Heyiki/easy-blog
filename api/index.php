@@ -491,51 +491,6 @@ class Index
         return $matches[1];
     }
 
-    // imitate chatgpt
-    public function chat() {
-        $input = $_REQUEST['question'] ?? '';
-        if (empty($input)) {
-            $this->retJson(['answer'=>"Error: Please input question."]);
-        }
-        // OpenAI API Key
-        $api_key = $_ENV['CHAT_API_KEY'] ?? '';
-        if (empty($api_key)) {
-            $this->retJson(['answer'=>"Error: Unknown api key."]);
-        }
-    
-        // ChatGPT API URL
-        $api_url = 'https://api.openai.com/v1/engines/davinci-codex/completions';
-    
-        // request header
-        $headers = array(
-            'Content-Type: application/json',
-            'Authorization: Bearer ' . $api_key
-        );
-    
-        // request data
-        $data = array(
-            'prompt' => $input,
-            'max_tokens' => 100
-        );
-    
-        // Send to ChatGPT API
-        $ch = curl_init($api_url);
-        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-        curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
-        curl_setopt($ch, CURLOPT_POST, true);
-        curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($data));
-        $response = curl_exec($ch);
-        curl_close($ch);
-    
-        // respones
-        $response = json_decode($response, true);
-        if (isset($response['choices'][0]['message']['content'])) {
-            $this->retJson(['answer'=>$response['choices'][0]['message']['content']]);
-        } else {
-            $this->retJson(['answer'=>"Error: Unable to get a valid response from ChatGPT."]);
-        }
-    }
-
 }
 
 print_r((new Index())->handle());
