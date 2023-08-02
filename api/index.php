@@ -493,12 +493,15 @@ class Index
 
     // imitate chatgpt
     public function chat() {
-        $input = $_REQUESR['question'];
+        $input = $_REQUEST['question'] ?? '';
         if (empty($input)) {
             $this->retJson(['answer'=>"Error: Please input question."]);
         }
         // OpenAI API Key
-        $api_key = $_ENV['CHAT_API_KEY'];
+        $api_key = $_ENV['CHAT_API_KEY'] ?? '';
+        if (empty($api_key)) {
+            $this->retJson(['answer'=>"Error: Unknown api key."]);
+        }
     
         // ChatGPT API URL
         $api_url = 'https://api.openai.com/v1/engines/davinci-codex/completions';
