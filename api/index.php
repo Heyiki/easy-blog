@@ -444,6 +444,11 @@ class Index
         $callback = $callback ? json_decode($callback,true) : [];
         $this->retJson($callback);
     }
+
+    public function getimg()
+    {
+        $this->retJson(['img'=>'https://cdn.jsdelivr.net/npm/heyiki-cdn/img/mobile-bg1.jpeg');
+    }
     
     # Get the last 15 days weather
     public function weather()
