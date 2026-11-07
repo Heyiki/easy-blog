@@ -14,350 +14,446 @@
  *
  */
 
-header("Access-Control-Allow-Origin: *");
+declare(strict_types=1);
 
-class Index
+header('Content-Type: application/json; charset=utf-8');
+header('Access-Control-Allow-Origin: *');
+header('Access-Control-Allow-Methods: GET, POST, PATCH, DELETE, OPTIONS');
+header('Access-Control-Allow-Headers: Content-Type, Token');
+
+if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'OPTIONS') {
+    http_response_code(204);
+    exit;
+}
+
+final class Index
 {
-    # notion token
     private string $token;
-    # notion database id
     private string $databaseId;
-    # aes encryption and encryption key, character length must be 32 bits
     private string $aesKey;
-    # aes encryption and encryption offset, character length must be 16 bits
     private string $aesIv;
-    # method name
     private string $method;
-    # notion page id
     private string $pageId;
-    # notion number of pages
     private int $pageSize = 20;
-    # notion page
     private string $page;
-    # whether backend model
     private bool $isBackend;
-    # operate key [Role: data change verification]
     private string $operateKey;
 
     public function __construct()
     {
-        error_reporting(E_ALL ^ E_NOTICE);
-        $this->token = $_ENV['NOTION_TOKEN'] ?? '';
-        $this->databaseId = $_ENV['DATABASE_ID'] ?? '';
-        $this->aesKey = $_ENV['AES_KEY'] ?? '';
-        $this->aesIv = $_ENV['AES_IV'] ?? '';
-        $this->operateKey = $_ENV['OPERATE_KEY'] ?? '';
-        if (empty($this->token) && empty($this->databaseId) && empty($this->aesKey) && empty($this->aesIv) && empty($this->operateKey)) {
-            $this->retJson([],"Missing required environment variables",400);
+        $this->token = $this->getEnv('NOTION_TOKEN');
+        $this->databaseId = $this->getEnv('DATABASE_ID');
+        $this->aesKey = $this->getEnv('AES_KEY');
+        $this->aesIv = $this->getEnv('AES_IV');
+        $this->operateKey = $this->getEnv('OPERATE_KEY');
+
+        if (
+            $this->token === '' ||
+            $this->databaseId === '' ||
+            $this->aesKey === '' ||
+            $this->aesIv === '' ||
+            $this->operateKey === ''
+        ) {
+            $this->retJson([], 'Missing required environment variables', 500);
         }
-        $this->method = $this->getParam('m');
-        if(in_array(strtolower($this->method),['create','edit','delete'])){
+
+        // AES-256-CBC requires a 32-byte key and a 16-byte IV.
+        if (strlen($this->aesKey) !== 32 || strlen($this->aesIv) !== 16) {
+            $this->retJson([], 'AES_KEY must be 32 bytes and AES_IV must be 16 bytes', 500);
+        }
+
+        $this->method = strtolower($this->getParam('m'));
+
+        if (in_array($this->method, ['create', 'edit', 'delete'], true)) {
             $this->verifyToken();
         }
+
         $this->pageId = $this->getParam('pid');
-        $this->pageSize = (int)$this->getParam('size') ?? 20;
+        $this->pageSize = max(1, min(100, (int)($this->getParam('size') ?: 20)));
         $this->page = $this->getParam('current');
-        $this->isBackend = $this->getParam('backend');
-    }
-
-    public function handle()
-    {
-        # call the specified method
-        return method_exists($this, $this->method) ? call_user_func([$this, $this->method]) : $this->retJson([],"{$this->method} is not exist",400);
-    }
-
-    # Anti-sql injection
-    private function getParam($param)
-    {
-        return !empty($_REQUEST[$param]) ? htmlentities(urldecode($_REQUEST[$param]), ENT_QUOTES, 'UTF-8') : '';
-    }
-
-    # list
-    public function rows()
-    {
-        $params = $this->filterCriteria();
-        $res = $this->curlSend('https://api.notion.com/v1/databases/'.$this->databaseId.'/query',$params);
-        $list = [];
-        if (!empty($res['results'])) {
-            foreach ($res['results'] as $v) {
-                $list[] = [
-                    'id'=>$v['id'],
-                    'created_at'=>$this->isoDateToDateTime($v['properties']['created_at']['created_time']),
-                    'updated_at'=>$this->isoDateToDateTime($v['properties']['updated_at']['last_edited_time']),
-                    'status'=>$v['properties']['status']['number'],
-                    'tags'=>$v['properties']['tags']['rich_text'][0]['plain_text'],
-                    'title'=>(strlen($v['properties']['title']['title'][0]['plain_text'])>100) ? mb_substr($v['properties']['title']['title'][0]['plain_text'], 0, 100).'...' : $v['properties']['title']['title'][0]['plain_text'],
-                ];
-            }
-        }
-        $this->retJson(
-            [
-                'next_cursor'=>$res['next_cursor'] ?? '',
-                'list'=>$list,
-            ]
+        $this->isBackend = filter_var(
+            $this->getParam('backend'),
+            FILTER_VALIDATE_BOOLEAN
         );
     }
 
-    # list filter
-    private function filterCriteria()
+    private function getEnv(string $name, string $default = ''): string
+    {
+        $value = $_ENV[$name] ?? getenv($name);
+
+        return is_string($value) ? $value : $default;
+    }
+
+    public function handle(): void
+    {
+        $allowedMethods = [
+            'rows',
+            'detail',
+            'create',
+            'edit',
+            'delete',
+            'login',
+            'poetry',
+            'getimg',
+            'weather',
+        ];
+
+        if (!in_array($this->method, $allowedMethods, true)) {
+            $this->retJson([], 'Method does not exist or is not allowed', 400);
+        }
+
+        $this->{$this->method}();
+    }
+
+    /**
+     * Read a request parameter without HTML-encoding API data.
+     */
+    private function getParam(string $param): string
+    {
+        $value = $_REQUEST[$param] ?? '';
+
+        if (!is_string($value) && !is_numeric($value)) {
+            return '';
+        }
+
+        return trim((string)$value);
+    }
+
+    /**
+     * List
+     */
+    public function rows(): void
+    {
+        $params = $this->filterCriteria();
+
+        $res = $this->curlSend(
+            'https://api.notion.com/v1/databases/' . rawurlencode($this->databaseId) . '/query',
+            $params
+        );
+
+        $list = [];
+
+        foreach (($res['results'] ?? []) as $item) {
+            $properties = $item['properties'] ?? [];
+            $title = $properties['title']['title'][0]['plain_text'] ?? '';
+
+            $list[] = [
+                'id' => $item['id'] ?? '',
+                'created_at' => $this->isoDateToDateTime(
+                    $properties['created_at']['created_time'] ?? ''
+                ),
+                'updated_at' => $this->isoDateToDateTime(
+                    $properties['updated_at']['last_edited_time'] ?? ''
+                ),
+                'status' => $properties['status']['number'] ?? null,
+                'tags' => $properties['tags']['rich_text'][0]['plain_text'] ?? '',
+                'title' => mb_strlen($title, 'UTF-8') > 100
+                    ? mb_substr($title, 0, 100, 'UTF-8') . '...'
+                    : $title,
+            ];
+        }
+
+        $this->retJson([
+            'next_cursor' => $res['next_cursor'] ?? '',
+            'list' => $list,
+        ]);
+    }
+
+    /**
+     * List filters
+     */
+    private function filterCriteria(): array
     {
         $filterParams = [
-            'tf' => $this->getParam('tf'),// title filter
-            'tbf' => $this->getParam('tbf'),// tags filter
-            'sf' => isset($_REQUEST['sf']) ? $_REQUEST['sf'] : '',// status filter
+            'tf' => $this->getParam('tf'),
+            'tbf' => $this->getParam('tbf'),
+            'sf' => $this->getParam('sf'),
         ];
-        $params['page_size'] = $this->pageSize;
-        if($this->page) {
+
+        $params = [
+            'page_size' => $this->pageSize,
+            'sorts' => [
+                ['property' => 'updated_at', 'direction' => 'descending'],
+                ['property' => 'created_at', 'direction' => 'descending'],
+            ],
+        ];
+
+        if ($this->page !== '') {
             $params['start_cursor'] = $this->page;
         }
+
         $filter = [];
+
         if (!$this->isBackend) {
             $filter[] = [
-                "property"=> "status",
-                "number"=> [
-                    "equals"=> 1
-                ]
+                'property' => 'status',
+                'number' => ['equals' => 1],
             ];
-        } else {
-            if(is_numeric($filterParams['sf'])){
-                $filter[] = [
-                    "property"=> "status",
-                    "number"=> [
-                        "equals"=> (int)$filterParams['sf']
-                    ]
-                ];
-            }
+        } elseif ($filterParams['sf'] !== '' && is_numeric($filterParams['sf'])) {
+            $filter[] = [
+                'property' => 'status',
+                'number' => ['equals' => (int)$filterParams['sf']],
+            ];
         }
-        if($filterParams['tf'] || $filterParams['tbf']) {
-            if($filterParams['tf']){
-                $filter[] = [
-                    "property"=> "title",
-                    "title"=> [
-                        "contains"=> $filterParams['tf']
-                    ]
-                ];
-            }
-            if($filterParams['tbf']){
-                $filter[] = [
-                    "property"=> "tags",
-                    "rich_text"=> [
-                        "contains"=> $filterParams['tbf']
-                    ]
-                ];
-            }
+
+        if ($filterParams['tf'] !== '') {
+            $filter[] = [
+                'property' => 'title',
+                'title' => ['contains' => $filterParams['tf']],
+            ];
         }
-        if($filter) {
-            $params['filter'] = ["and" => $filter];
+
+        if ($filterParams['tbf'] !== '') {
+            $filter[] = [
+                'property' => 'tags',
+                'rich_text' => ['contains' => $filterParams['tbf']],
+            ];
         }
-        // to sort
-        $params['sorts'] = [
-            ['property'=> 'updated_at', 'direction'=> 'descending'],
-            ['property'=> 'created_at', 'direction'=> 'descending'],
-        ];
+
+        if ($filter !== []) {
+            $params['filter'] = ['and' => $filter];
+        }
 
         return $params;
     }
 
-    # detail
-    public function detail()
+    /**
+     * Detail
+     */
+    public function detail(): void
     {
-        if (empty($this->pageId)) $this->retJson([],'Unknown object',400);
-        $preview = $this->curlSend('https://api.notion.com/v1/pages/'.$this->pageId,[],'GET');
-        $block = $this->curlSend('https://api.notion.com/v1/blocks/'.$this->pageId.'/children',[],'GET');
-        $properties = $preview['properties'] ?? [];
-        if (empty($properties)) $this->retJson([],'Unknown object',400);
+        if ($this->pageId === '') {
+            $this->retJson([], 'Unknown object', 400);
+        }
+
+        $page = $this->curlSend(
+            'https://api.notion.com/v1/pages/' . rawurlencode($this->pageId),
+            [],
+            'GET'
+        );
+
+        $block = $this->curlSend(
+            'https://api.notion.com/v1/blocks/' . rawurlencode($this->pageId) . '/children',
+            [],
+            'GET'
+        );
+
+        $properties = $page['properties'] ?? [];
+
+        if ($properties === []) {
+            $this->retJson([], 'Unknown object', 404);
+        }
+
         $content = '';
-        foreach ($block['results'] as $v) {
-            if (!empty($v['paragraph']['rich_text'][0]['plain_text'])) {
-                $content .= $v['paragraph']['rich_text'][0]['plain_text'];
+
+        foreach (($block['results'] ?? []) as $item) {
+            $richText = $item['paragraph']['rich_text'] ?? [];
+
+            foreach ($richText as $text) {
+                $content .= $text['plain_text'] ?? '';
             }
         }
+
         $this->retJson([
-            'pid'=>$this->pageId,
-            'status'=>$properties['status']['number'],
-            'tags'=>$properties['tags']['rich_text'][0]['plain_text'],
-            'title'=>$properties['title']['title'][0]['plain_text'],
-            'content'=>$content,
+            'pid' => $this->pageId,
+            'status' => $properties['status']['number'] ?? null,
+            'tags' => $properties['tags']['rich_text'][0]['plain_text'] ?? '',
+            'title' => $properties['title']['title'][0]['plain_text'] ?? '',
+            'content' => $content,
         ]);
     }
 
-    # create
-    public function create()
+    /**
+     * Create
+     */
+    public function create(): void
     {
-        if(empty($this->getParam('title'))) $this->retJson([],'Please complete this required field.',400);
-        if(empty($this->getParam('tags'))) $this->retJson([],'Please complete this required field.',400);
-        if(empty($this->getParam('content'))) $this->retJson([],'Please complete this required field.',400);
+        $title = $this->getParam('title');
+        $tags = $this->getParam('tags');
+        $content = $this->getParam('content');
+
+        if ($title === '' || $tags === '' || $content === '') {
+            $this->retJson([], 'Please complete this required field.', 400);
+        }
+
         $data = [
-            'parent'=>[
+            'parent' => [
                 'type' => 'database_id',
-                'database_id' => $this->databaseId
+                'database_id' => $this->databaseId,
             ],
         ];
-        $data = array_merge($data,$this->structure());
-        $res = $this->curlSend('https://api.notion.com/v1/pages',$data);
-        $this->retJson($res,'Created successfully');
+
+        $data = array_merge($data, $this->structure(false));
+
+        $res = $this->curlSend(
+            'https://api.notion.com/v1/pages',
+            $data
+        );
+
+        $this->retJson($res, 'Created successfully');
     }
 
-    # Get the created structure
-    private function structure($isEdit = false)
+    /**
+     * Build page properties and paragraph blocks.
+     */
+    private function structure(bool $isEdit = false): array
     {
         $content = $this->getParam('content');
-        $limit_str = 2000;
-        $strLen = mb_strlen($content,'UTF-8');
-        if ($strLen > $limit_str) {
-            $format = [];
-            $ret = array();
-            for ($i = 0; $i < $strLen; $i += $limit_str) {
-                $ret[] = mb_substr($content, $i, $limit_str,'UTF-8');
-            }
-            if (!empty($ret)) {
-                foreach ($ret as $v) {
-                    if ($isEdit) {
-                        $format[] = [
-                            "paragraph"=> [
-                                "rich_text"=> [
-                                    [
-                                        "type"=> "text",
-                                        "text"=> [
-                                            "content"=> $v,
-                                            "link"=> null
-                                        ]
-                                    ]
-                                ]
-                            ],
-                        ];
-                    } else {
-                        $format[] = [
-                            'object'=>'block',
-                            "type"=> "paragraph",
-                            "paragraph"=> [
-                                "rich_text"=> [
-                                    [
-                                        "type"=> "text",
-                                        "text"=> [
-                                            "content"=> $v,
-                                            "link"=> null
-                                        ]
-                                    ]
-                                ]
-                            ],
-                        ];
-                    }
-                }
-            }
-        } else {
+        $title = $this->getParam('title');
+        $tags = $this->getParam('tags');
+        $status = $this->getParam('status');
+
+        $chunks = mb_str_split($content, 2000, 'UTF-8');
+        $format = [];
+
+        foreach ($chunks as $chunk) {
+            $paragraph = [
+                'rich_text' => [
+                    [
+                        'type' => 'text',
+                        'text' => [
+                            'content' => $chunk,
+                        ],
+                    ],
+                ],
+            ];
+
             if ($isEdit) {
-                $format = [
-                    [
-                        "paragraph"=> [
-                            "rich_text"=> [
-                                [
-                                    "type"=> "text",
-                                    "text"=> [
-                                        "content"=> $content,
-                                        "link"=> null
-                                    ]
-                                ]
-                            ]
-                        ],
-                    ]
-                ];
+                $format[] = ['paragraph' => $paragraph];
             } else {
-                $format = [
-                    [
-                        'object'=>'block',
-                        "type"=> "paragraph",
-                        "paragraph"=> [
-                            "rich_text"=> [
-                                [
-                                    "type"=> "text",
-                                    "text"=> [
-                                        "content"=> $content,
-                                        "link"=> null
-                                    ]
-                                ]
-                            ]
-                        ],
-                    ]
+                $format[] = [
+                    'object' => 'block',
+                    'type' => 'paragraph',
+                    'paragraph' => $paragraph,
                 ];
             }
         }
+
         return [
-            'properties'=>[
+            'properties' => [
                 'title' => [
-                    'id' => 'title',
-                    'type' => 'title',
                     'title' => [
                         [
-                            'type'=>'text',
-                            'text'=>[
-                                'content'=>$this->getParam('title'),
-                                'link'=>null
-                            ],
-                        ]
+                            'type' => 'text',
+                            'text' => ['content' => $title],
+                        ],
                     ],
                 ],
-                'tags'=>[
-                    'type'=>'rich_text',
-                    'rich_text'=>[
+                'tags' => [
+                    'rich_text' => [
                         [
-                            'type'=>'text',
-                            'text'=>[
-                                'content'=>$this->getParam('tags'),
-                                'link'=>null
-                            ],
-                        ]
-                    ]
+                            'type' => 'text',
+                            'text' => ['content' => $tags],
+                        ],
+                    ],
                 ],
-                'status'=>[
-                    'number' => (int)$this->getParam('status')
-                ]
+                'status' => [
+                    'number' => $status === '' ? 0 : (int)$status,
+                ],
             ],
-            'children'=>$format,
+            'children' => $format,
         ];
     }
 
-    # edit
-    public function edit()
+    /**
+     * Edit
+     */
+    public function edit(): void
     {
-        if (empty($this->pageId)) $this->retJson([],'Unknown object',400);
-        if(empty($this->getParam('title'))) $this->retJson([],'Please complete this required field.',400);
-        if(empty($this->getParam('tags'))) $this->retJson([],'Please complete this required field.',400);
-        if(empty($this->getParam('content'))) $this->retJson([],'Please complete this required field.',400);
+        if ($this->pageId === '') {
+            $this->retJson([], 'Unknown object', 400);
+        }
 
-        $page = $this->curlSend('https://api.notion.com/v1/pages/'.$this->pageId,[],'GET');
-        $block = $this->curlSend('https://api.notion.com/v1/blocks/'.$this->pageId.'/children',[],'GET');
-        if (empty($page['properties'])&&empty($block['results'][0]['id'])) $this->retJson([],'Unknown object',400);
+        $title = $this->getParam('title');
+        $tags = $this->getParam('tags');
+        $content = $this->getParam('content');
+
+        if ($title === '' || $tags === '' || $content === '') {
+            $this->retJson([], 'Please complete this required field.', 400);
+        }
+
+        $pageId = rawurlencode($this->pageId);
+
+        $page = $this->curlSend(
+            'https://api.notion.com/v1/pages/' . $pageId,
+            [],
+            'GET'
+        );
+
+        if (empty($page['properties'])) {
+            $this->retJson([], 'Unknown object', 404);
+        }
+
+        $block = $this->curlSend(
+            'https://api.notion.com/v1/blocks/' . $pageId . '/children',
+            [],
+            'GET'
+        );
 
         $data = $this->structure(true);
 
-        foreach ($block['results'] as $v) {
-            $this->curlSend('https://api.notion.com/v1/blocks/'.$v['id'],[],'DELETE');
+        // Remove existing paragraph blocks.
+        foreach (($block['results'] ?? []) as $item) {
+            if (!empty($item['id'])) {
+                $this->curlSend(
+                    'https://api.notion.com/v1/blocks/' . rawurlencode($item['id']),
+                    [],
+                    'DELETE'
+                );
+            }
         }
 
-        // update page data
-        $res = $this->curlSend('https://api.notion.com/v1/pages/'.$this->pageId,['properties'=>$data['properties']],'PATCH');
-        // update block data
-        $res1 = $this->curlSend('https://api.notion.com/v1/blocks/'.$this->pageId.'/children',['children'=>$data['children']],'PATCH');
-        if (isset($res['status']) && $res['status'] == 400) {
-            $this->retJson($res,'Update failed',400);
-        }
-        if (isset($res1['status']) && $res1['status'] == 400) {
-            $this->retJson($res1,'Update failed',400);
-        }
-        $this->retJson([],'Update successfully');
+        // Update page properties using writable fields only.
+        $res = $this->curlSend(
+            'https://api.notion.com/v1/pages/' . $pageId,
+            ['properties' => $data['properties']],
+            'PATCH'
+        );
+
+        // Append the new paragraph blocks.
+        $res1 = $this->curlSend(
+            'https://api.notion.com/v1/blocks/' . $pageId . '/children',
+            ['children' => $data['children']],
+            'PATCH'
+        );
+
+        $this->retJson([
+            'page' => $res,
+            'blocks' => $res1,
+        ], 'Updated successfully');
     }
 
-    # delete
-    public function delete()
+    /**
+     * Delete
+     */
+    public function delete(): void
     {
-        $res = $this->curlSend('https://api.notion.com/v1/blocks/'.$this->pageId,[],'DELETE');
-        $this->retJson($res,'Deleted successfully');
+        if ($this->pageId === '') {
+            $this->retJson([], 'Unknown object', 400);
+        }
+
+        $res = $this->curlSend(
+            'https://api.notion.com/v1/blocks/' . rawurlencode($this->pageId),
+            [],
+            'DELETE'
+        );
+
+        $this->retJson($res, 'Deleted successfully');
     }
 
-    private function curlSend($url = '', $data = [], $method = 'POST')
-    {
+    /**
+     * Send a request to Notion API.
+     */
+    private function curlSend(
+        string $url,
+        array $data = [],
+        string $method = 'POST'
+    ): array {
         $curl = curl_init();
+
+        if ($curl === false) {
+            $this->retJson([], 'Failed to initialize cURL', 500);
+        }
 
         $options = [
             CURLOPT_URL => $url,
@@ -365,135 +461,345 @@ class Index
             CURLOPT_ENCODING => '',
             CURLOPT_MAXREDIRS => 10,
             CURLOPT_TIMEOUT => 30,
-            CURLOPT_HTTP_VERSION => CURL_HTTP_VERSION_1_1,
+            CURLOPT_CONNECTTIMEOUT => 10,
             CURLOPT_CUSTOMREQUEST => $method,
             CURLOPT_HTTPHEADER => [
                 'Notion-Version: 2022-06-28',
-                'accept: application/json',
-                'authorization: Bearer ' . $this->token,
-                'content-type: application/json'
+                'Accept: application/json',
+                'Authorization: Bearer ' . $this->token,
+                'Content-Type: application/json',
             ],
         ];
-        if (!empty($data)) {
-            $options[CURLOPT_POSTFIELDS] = json_encode($data,JSON_UNESCAPED_UNICODE);
+
+        if ($data !== []) {
+            try {
+                $options[CURLOPT_POSTFIELDS] = json_encode(
+                    $data,
+                    JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR
+                );
+            } catch (JsonException $e) {
+                $this->retJson([], 'Failed to encode request JSON', 500);
+            }
         }
 
-        curl_setopt_array($curl, $options);
+        if (!curl_setopt_array($curl, $options)) {
+            $this->retJson([], 'Failed to configure cURL', 500);
+        }
 
         $response = curl_exec($curl);
-        $err = curl_error($curl);
+        $error = curl_error($curl);
+        $httpCode = (int)curl_getinfo($curl, CURLINFO_HTTP_CODE);
 
-        if ($err) {
-            $this->retJson([],$err,400);
-        } else {
-            return json_decode(htmlspecialchars_decode($response),true);
+        // curl_close() is deprecated in PHP 8.5 and has had no effect since PHP 8.0.
+        // The CurlHandle is released automatically when it is no longer referenced.
+        unset($curl);
+
+        if ($response === false) {
+            $this->retJson([], 'cURL error: ' . $error, 502);
+        }
+
+        try {
+            $result = json_decode(
+                $response,
+                true,
+                512,
+                JSON_THROW_ON_ERROR
+            );
+        } catch (JsonException $e) {
+            $this->retJson([], 'Invalid JSON response from Notion', 502);
+        }
+
+        if (!is_array($result)) {
+            $this->retJson([], 'Unexpected response from Notion', 502);
+        }
+
+        if ($httpCode < 200 || $httpCode >= 300) {
+            $message = $result['message'] ?? 'Notion API request failed';
+
+            $this->retJson(
+                $result,
+                (string)$message,
+                $httpCode >= 400 && $httpCode <= 599 ? $httpCode : 502
+            );
+        }
+
+        return $result;
+    }
+
+    /**
+     * Convert an ISO 8601 date to Asia/Shanghai time.
+     */
+    private function isoDateToDateTime(string $isoDate): string
+    {
+        if ($isoDate === '') {
+            return '';
+        }
+
+        try {
+            $date = new DateTimeImmutable($isoDate);
+            $date = $date->setTimezone(new DateTimeZone('Asia/Shanghai'));
+
+            return $date->format('Y-m-d H:i');
+        } catch (Exception $e) {
+            return '';
         }
     }
 
-    private function isoDateToDateTime($isoDate = '')
-    {
-        // form UTC to Asia/Shanghai
-        $date = new DateTime(date("Y-m-d H:i",strtotime($isoDate)), new DateTimeZone('UTC'));
-        $date->setTimezone(new DateTimeZone('Asia/Shanghai'));
-        return $date->format('Y-m-d H:i');
+    /**
+     * Output JSON and terminate.
+     */
+    private function retJson(
+        array $data = [],
+        string $msg = 'ok',
+        int $code = 200
+    ): never {
+        http_response_code($code);
+
+        try {
+            echo json_encode(
+                [
+                    'code' => $code,
+                    'msg' => $msg,
+                    'data' => $data,
+                ],
+                JSON_UNESCAPED_UNICODE |
+                JSON_INVALID_UTF8_SUBSTITUTE |
+                JSON_THROW_ON_ERROR
+            );
+        } catch (JsonException $e) {
+            echo '{"code":500,"msg":"JSON encoding failed","data":[]}';
+        }
+
+        exit;
     }
 
-    private function retJson($data = [], $msg = 'ok', $code = 200)
+    /**
+     * Verify operation token.
+     */
+    private function verifyToken(): void
     {
-        exit(json_encode(['code'=>$code,'msg'=>$msg,'data'=>$data]));
+        $encryptedToken = $_SERVER['HTTP_TOKEN'] ?? '';
+
+        if (!is_string($encryptedToken) || $encryptedToken === '') {
+            $this->retJson([], 'Token invalid', 403);
+        }
+
+        $decodedToken = base64_decode($encryptedToken, true);
+
+        if ($decodedToken === false) {
+            $this->retJson([], 'Token invalid', 403);
+        }
+
+        $plainToken = openssl_decrypt(
+            $decodedToken,
+            'AES-256-CBC',
+            $this->aesKey,
+            OPENSSL_RAW_DATA,
+            $this->aesIv
+        );
+
+        if ($plainToken === false) {
+            $this->retJson([], 'Token invalid', 403);
+        }
+
+        try {
+            $data = json_decode($plainToken, false, 512, JSON_THROW_ON_ERROR);
+        } catch (JsonException $e) {
+            $this->retJson([], 'Token invalid', 403);
+        }
+
+        if (
+            !is_object($data) ||
+            !isset($data->exp, $data->iat, $data->key) ||
+            !is_numeric($data->exp) ||
+            (int)$data->exp <= time() ||
+            !is_string($data->iat) ||
+            !is_string($data->key) ||
+            !hash_equals((string)($_SERVER['REMOTE_ADDR'] ?? ''), $data->iat) ||
+            !hash_equals($this->operateKey, $data->key)
+        ) {
+            $this->retJson([], 'Token invalid', 403);
+        }
     }
 
-    private function verifyToken()
-    {
-        $token = !empty($_SERVER['HTTP_TOKEN']) ? $_SERVER['HTTP_TOKEN'] : '';
-        if(empty($token)) $this->retJson([],'Token invalid',403);
-        $token = openssl_decrypt(base64_decode($token), 'AES-256-CBC', $this->aesKey, true, $this->aesIv);
-        $data = !empty($token) ? json_decode($token) : null;
-        if (empty($data)) $this->retJson([],'Token invalid',403);
-        if(empty($data->exp) || $data->exp <= time()) $this->retJson([],'Token invalid',403);
-        if(empty($data->iat) || $data->iat != $_SERVER['REMOTE_ADDR']) $this->retJson([],'Token invalid',403);
-        if(empty($data->key) || $data->key != $this->operateKey) $this->retJson([],'Token invalid',403);
-        return true;
-    }
-
-    public function login()
+    /**
+     * Login and issue an operation token.
+     */
+    public function login(): void
     {
         $operateKey = $this->getParam('operate_key');
-        if (empty($operateKey) || $operateKey != $this->operateKey) {
-            $this->retJson([],'Operation key is incorrect',400);
+
+        if (
+            $operateKey === '' ||
+            !hash_equals($this->operateKey, $operateKey)
+        ) {
+            $this->retJson([], 'Operation key is incorrect', 400);
         }
-        $this->retJson(
-            [
-                'token' => base64_encode(openssl_encrypt(
-                    json_encode(['exp'=>time()+86400,'iat'=>$_SERVER['REMOTE_ADDR'],'key'=>$this->operateKey]),
-                    'AES-256-CBC',
-                    $this->aesKey,
-                    true,
-                    $this->aesIv
-                ))
-            ]
+
+        try {
+            $payload = json_encode(
+                [
+                    'exp' => time() + 86400,
+                    'iat' => (string)($_SERVER['REMOTE_ADDR'] ?? ''),
+                    'key' => $this->operateKey,
+                ],
+                JSON_THROW_ON_ERROR
+            );
+        } catch (JsonException $e) {
+            $this->retJson([], 'Failed to create token', 500);
+        }
+
+        $encrypted = openssl_encrypt(
+            $payload,
+            'AES-256-CBC',
+            $this->aesKey,
+            OPENSSL_RAW_DATA,
+            $this->aesIv
         );
+
+        if ($encrypted === false) {
+            $this->retJson([], 'Failed to encrypt token', 500);
+        }
+
+        $this->retJson([
+            'token' => base64_encode($encrypted),
+        ]);
     }
 
-    # Poetry Recommendation
-    public function poetry()
+    /**
+     * Poetry recommendation.
+     */
+    public function poetry(): void
     {
-        $callback = file_get_contents('https://v1.jinrishici.com/all.json');
-        $callback = $callback ? json_decode($callback,true) : [];
-        $this->retJson($callback);
+        $response = $this->httpGet('https://v1.jinrishici.com/all.json');
+
+        try {
+            $data = $response !== ''
+                ? json_decode($response, true, 512, JSON_THROW_ON_ERROR)
+                : [];
+        } catch (JsonException $e) {
+            $data = [];
+        }
+
+        $this->retJson(is_array($data) ? $data : []);
     }
 
-    public function getimg()
+    public function getimg(): void
     {
-        $this->retJson(['img'=>'https://cdn.jsdelivr.net/npm/heyiki-cdn/img/mobile-bg1.jpeg']);
+        $this->retJson([
+            'img' => 'https://cdn.jsdelivr.net/npm/heyiki-cdn/img/mobile-bg1.jpeg',
+        ]);
     }
-    
-    # Get the last 15 days weather
-    public function weather()
+
+    /**
+     * Get the next 15 days of weather data.
+     */
+    public function weather(): void
     {
-        $url = $_ENV['WEATHER_URL'] ?? 'https://tianqi.moji.com/forecast15/china/guangdong/shenzhen';
-        if(empty($url)) $this->retJson(['c'=>$_ENV['WEATHER_URL']],'Unknown location',400);
-        $html = file_get_contents($url);
-        $res = $this->get_tag_data($html,'ul','class','clearfix');
-        if(empty($res)) $this->retJson([],'Get weather error location',400);
-        $week = $this->get_tag_data($res[0],'span','class','week');
-        $temperature = $this->get_tag_data($res[0],'div','class','tree clearfix');
-        $wea = $this->get_tag_data($res[0],'span','class','wea');
+        $url = $this->getEnv(
+            'WEATHER_URL',
+            'https://tianqi.moji.com/forecast15/china/guangdong/shenzhen'
+        );
+
+        if ($url === '') {
+            $this->retJson([], 'Unknown location', 400);
+        }
+
+        $html = $this->httpGet($url);
+
+        if ($html === '') {
+            $this->retJson([], 'Get weather failed', 502);
+        }
+
+        $res = $this->getTagData($html, 'ul', 'class', 'clearfix');
+
+        if ($res === []) {
+            $this->retJson([], 'Get weather error location', 400);
+        }
+
+        $week = $this->getTagData($res[0], 'span', 'class', 'week');
+        $temperature = $this->getTagData($res[0], 'div', 'class', 'tree clearfix');
+        $weather = $this->getTagData($res[0], 'span', 'class', 'wea');
+
         $cycle = [];
-        if(!empty($week)) {
-            foreach ($week as $k => $v){
-                if($k%2!=0){
-                    $cycle[$k-1]['week'] = $v;
-                } else {
-                    $cycle[$k]['date'] = $v;
-                    if (!empty($wea[$k]) && !empty($wea[$k+1])) {
-                        $cycle[$k]['wea'] = $wea[$k] === $wea[$k+1] ? $wea[$k] : $wea[$k] . ' => ' . $wea[$k+1];
-                    }
-                }
+
+        foreach ($week as $key => $value) {
+            if ($key % 2 !== 0) {
+                $cycle[$key - 1]['week'] = $value;
+                continue;
+            }
+
+            $cycle[$key]['date'] = $value;
+
+            if (isset($weather[$key], $weather[$key + 1])) {
+                $cycle[$key]['wea'] = $weather[$key] === $weather[$key + 1]
+                    ? $weather[$key]
+                    : $weather[$key] . ' => ' . $weather[$key + 1];
             }
         }
-        $cycle = !empty($cycle) ? array_merge($cycle) : [];
-        if(!empty($cycle)) {
-            foreach ($cycle as $k => $v) {
-                if(!empty($temperature[$k])) {
-                    preg_match_all('/<b>(.*?)<\/b>/',$temperature[$k],$max);
-                    preg_match_all('/<strong>(.*?)<\/strong>/',$temperature[$k],$min);
-                }
-                $cycle[$k]['max'] = !empty($max[1][0]) ? $max[1][0] : 'unknown';
-                $cycle[$k]['min'] = !empty($min[1][0]) ? $min[1][0] : 'unknown';
+
+        $cycle = array_values($cycle);
+
+        foreach ($cycle as $key => &$item) {
+            $max = [];
+            $min = [];
+
+            if (isset($temperature[$key])) {
+                preg_match_all('/<b>(.*?)<\/b>/is', $temperature[$key], $max);
+                preg_match_all('/<strong>(.*?)<\/strong>/is', $temperature[$key], $min);
             }
+
+            $item['max'] = $max[1][0] ?? 'unknown';
+            $item['min'] = $min[1][0] ?? 'unknown';
         }
+
+        unset($item);
+
         $this->retJson($cycle);
     }
-    
-    private function get_tag_data($html,$tag,$class,$value){
-        // $value is empty, then get all the content of class=$class
-        $regex = $value ? "/<$tag.*?$class=\"$value\".*?>(.*?)<\/$tag>/is" :  "/<$tag.*?$class=\".*?$value.*?\".*?>(.*?)<\/$tag>/is";
-        preg_match_all($regex,$html,$matches);
-        // The return value is an array, the contents of the tag found
-        return $matches[1];
+
+    /**
+     * Fetch a URL with a timeout.
+     */
+    private function httpGet(string $url): string
+    {
+        $context = stream_context_create([
+            'http' => [
+                'timeout' => 15,
+                'header' => "User-Agent: EasyBlog-PHP/8.5\r\n",
+            ],
+            'https' => [
+                'timeout' => 15,
+                'header' => "User-Agent: EasyBlog-PHP/8.5\r\n",
+            ],
+        ]);
+
+        $result = @file_get_contents($url, false, $context);
+
+        return $result === false ? '' : $result;
     }
 
+    /**
+     * Extract HTML elements by tag and class.
+     */
+    private function getTagData(
+        string $html,
+        string $tag,
+        string $attribute,
+        string $value
+    ): array {
+        $tag = preg_quote($tag, '/');
+        $attribute = preg_quote($attribute, '/');
+        $value = preg_quote($value, '/');
+
+        $pattern = $value !== ''
+            ? '/<' . $tag . '\b[^>]*\b' . $attribute . '="' . $value . '"[^>]*>(.*?)<\/' . $tag . '\s*>/is'
+            : '/<' . $tag . '\b[^>]*\b' . $attribute . '="[^"]*"[^>]*>(.*?)<\/' . $tag . '\s*>/is';
+
+        preg_match_all($pattern, $html, $matches);
+
+        return $matches[1] ?? [];
+    }
 }
 
-print_r((new Index())->handle());
+(new Index())->handle();
